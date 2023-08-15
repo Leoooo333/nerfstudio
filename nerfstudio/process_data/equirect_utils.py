@@ -15,6 +15,8 @@
 """Helper utils for processing equirectangular data."""
 
 import os
+os.environ["OPENCV_IO_ENABLE_OPENEXR"]="1"
+
 import json
 import sys
 from pathlib import Path
@@ -288,30 +290,45 @@ def generate_planar_projections_from_equirectangular(
     idx = 0
     with progress:
         for i in progress.track(os.listdir(frame_dir), description="", total=num_ims):
-            if i.lower().endswith((".jpg", ".png", ".jpeg")):
-                im = np.array(cv2.imread(os.path.join(frame_dir, i)))
-                im = torch.tensor(im, dtype=torch.float32, device=device)
-                im = torch.permute(im, (2, 0, 1)) / 255.0
+            if i.lower().endswith((".jpg", ".png", ".jpeg", ".exr")):
+                if i.lower().endswith((".exr")):
+                    im = np.array(cv2.imread(os.path.join(frame_dir, i), cv2.IMREAD_UNCHANGED)).astype("float32")
+                    im = torch.tensor(im, dtype=torch.float32, device=device)
+                    im = torch.permute(im, (2, 0, 1))
+                else:
+                    im = np.array(cv2.imread(os.path.join(frame_dir, i)))
+                    im = torch.tensor(im, dtype=torch.float32, device=device)
+                    im = torch.permute(im, (2, 0, 1)) / 255.0
                 count = 0
                 current_pano_camera_pose = np.array(camera_to_worlds_panos[idx])
                 current_pano_camera_rotation = current_pano_camera_pose[:3, :3]
                 for u_deg, v_deg in yaw_pitch_pairs:
                     v_rad = torch.pi * v_deg / 180.0
                     u_rad = torch.pi * u_deg / 180.0
-                    pers_image = equi2pers(im, rots={"roll": 0, "pitch": v_rad, "yaw": u_rad}) * 255.0
+                    pers_image = equi2pers(im, rots={"roll": 0, "pitch": v_rad, "yaw": u_rad})
                     # transform matrix for blender: object.matrix_world 
-                    perspective_camera_rotation = inv(Rotation.from_euler('xyz', [v_rad, -u_rad, 0], degrees=False).as_matrix())
+                    perspective_camera_rotation = inv(Rotation.from_euler('XYZ', [v_rad, -u_rad, 0], degrees=False).as_matrix())
                     perspective_camera_rotation = current_pano_camera_rotation @  perspective_camera_rotation
                     perspective_camera_pose = current_pano_camera_pose.copy()
                     perspective_camera_pose[:3, :3] = perspective_camera_rotation
        
                     assert isinstance(pers_image, torch.Tensor)
-                    pers_image = (pers_image.permute(1, 2, 0)).type(torch.uint8).to("cpu").numpy()
-                    cv2.imwrite(f"{output_dir}/{i[:-4]}_{count}.png", pers_image)
-                    frame = {
-                        "file_path": f"{output_dir}/{i[:-4]}_{count}.png",
-                        "transform_matrix": perspective_camera_pose.tolist(),
-                    }
+                    if i.lower().endswith((".exr")):
+                        # normalize alpha channel
+                        pers_image = (pers_image.permute(1, 2, 0)).type(torch.float32).to("cpu").numpy()
+                        cv2.imwrite(f"{output_dir}/{i[:-4]}_{count}.exr", pers_image)
+                        frame = {
+                            "file_path": f"{output_dir}/{i[:-4]}_{count}.exr",
+                            "transform_matrix": perspective_camera_pose.tolist(),
+                        }
+                    else:
+                        pers_image *= 255.0
+                        pers_image = (pers_image.permute(1, 2, 0)).type(torch.uint8).to("cpu").numpy()
+                        cv2.imwrite(f"{output_dir}/{i[:-4]}_{count}.png", pers_image)
+                        frame = {
+                            "file_path": f"{output_dir}/{i[:-4]}_{count}.png",
+                            "transform_matrix": perspective_camera_pose.tolist(),
+                        }
                     frames.append(frame)        
                     count += 1
             idx += 1
@@ -321,11 +338,12 @@ def generate_planar_projections_from_equirectangular(
     def fov2foc_len(fov, sensor_width):
         return sensor_width / (2. * math.tan(math.radians(fov / 2)))
     ## default in blender perspective camera: camera sensor width == 36 mm
-    sensor_width = 36
-    focal_length = fov2foc_len(fov, sensor_width)
+    focal_length_x = fov2foc_len(fov, W)
+    focal_length_y = fov2foc_len(fov, H)
+
     out = {
-        "fl_x": focal_length,
-        "fl_y": focal_length,
+        "fl_x": focal_length_x,
+        "fl_y": focal_length_y,
         "cx": cx,
         "cy": cy,
         "w": W,
@@ -348,7 +366,7 @@ def compute_resolution_from_equirect(image_dir: Path, num_images: int) -> Tuple[
     """
 
     for i in os.listdir(image_dir):
-        if i.lower().endswith((".jpg", ".png", ".jpeg")):
+        if i.lower().endswith((".jpg", ".png", ".jpeg", ".exr")):
             im = np.array(cv2.imread(os.path.join(image_dir, i)))
             res_squared = (im.shape[0] * im.shape[1]) / num_images
             return (int(np.sqrt(res_squared)), int(np.sqrt(res_squared)))

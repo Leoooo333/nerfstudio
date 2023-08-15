@@ -54,9 +54,11 @@ class ProcessAlignedPano(BaseConverterToNerfstudioDataset):
     """
     crop_factor: Tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0)
     """Portion of the image to crop. All values should be in [0,1]. (top, bottom, left, right)"""
-
     skip_image_processing: bool = False
     """If True, skips copying and downscaling of images and only runs COLMAP if possible and enabled"""
+    is_HDR: bool = False
+    """If True, process the .exr files as HDR images."""
+    
     def main(self) -> None:
         """Process images into a nerfstudio dataset."""
 
@@ -67,11 +69,11 @@ class ProcessAlignedPano(BaseConverterToNerfstudioDataset):
         summary_log = []
         pers_size = equirect_utils.compute_resolution_from_equirect(self.data, self.images_per_equirect)
         CONSOLE.log(f"Generating {self.images_per_equirect} {pers_size} sized images per equirectangular image")
-        self.data = equirect_utils.generate_planar_projections_from_equirectangular(
-            self.metadata, self.data, pers_size, self.images_per_equirect, crop_factor=self.crop_factor
-        )
+        # self.data = equirect_utils.generate_planar_projections_from_equirectangular(
+        #     self.metadata, self.data, pers_size, self.images_per_equirect, crop_factor=self.crop_factor
+        # )
         self.camera_type = "perspective"
-
+        self.data = self.data / "planar_projections"
         metadata_dict = io.load_from_json(self.data / "transforms.json")
         # Copy images to output directory
         cropped_images_filename = []
@@ -79,9 +81,15 @@ class ProcessAlignedPano(BaseConverterToNerfstudioDataset):
             cropped_images_filename.append(Path(frame["file_path"]))
         
         # Copy images to output directory
-        copied_image_paths = process_data_utils.copy_images_list(
-            cropped_images_filename, image_dir=image_dir, verbose=self.verbose
-        )
+        if self.is_HDR:
+            copied_image_paths = process_data_utils.copy_images_list_EXR(
+                cropped_images_filename, image_dir=image_dir, verbose=self.verbose, num_downscales=self.num_downscales
+            )
+        else:
+            copied_image_paths = process_data_utils.copy_images_list(
+                cropped_images_filename, image_dir=image_dir, verbose=self.verbose, num_downscales=self.num_downscales
+            )
+        
         num_frames = len(copied_image_paths)
 
         copied_image_paths = [Path("images/" + copied_image_path.name) for copied_image_path in copied_image_paths]
@@ -91,9 +99,6 @@ class ProcessAlignedPano(BaseConverterToNerfstudioDataset):
                 "To change the size of the dataset add the argument [yellow]--max_dataset_size[/yellow] to "
                 f"larger than the current value ({self.max_dataset_size}), or -1 to use all images."
             )
-        if not self.skip_image_processing:
-            # Downscale images
-            summary_log.append(process_data_utils.downscale_images(image_dir, self.num_downscales, verbose=self.verbose))
 
         metadata_path = self.output_dir / "transforms.json"
         for i, frame in enumerate(metadata_dict["frames"]):

@@ -54,6 +54,8 @@ from nerfstudio.configs.dataparser_configs import AnnotatedDataParserUnion
 from nerfstudio.data.dataparsers.base_dataparser import DataparserOutputs
 from nerfstudio.data.dataparsers.blender_dataparser import BlenderDataParserConfig
 from nerfstudio.data.datasets.base_dataset import InputDataset
+from nerfstudio.data.datasets.hdr_dataset import HDRInputDataset
+
 from nerfstudio.data.pixel_samplers import (
     EquirectangularPixelSampler,
     PatchPixelSampler,
@@ -347,7 +349,13 @@ class VanillaDataManagerConfig(DataManagerConfig):
     patch_size: int = 1
     """Size of patch to sample from. If >1, patch-based sampling will be used."""
 
+@dataclass
+class HDRVanillaDataManagerConfig(VanillaDataManagerConfig):
+    """A HDR data manager, based on VanillaDataManager"""
 
+    _target: Type = field(default_factory=lambda: VanillaDataManager[HDRInputDataset])
+    """Target class to instantiate."""
+    
 TDataset = TypeVar("TDataset", bound=InputDataset, default=InputDataset)
 
 

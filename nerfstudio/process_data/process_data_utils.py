@@ -306,6 +306,103 @@ def copy_images_list(
 
     return copied_image_paths
 
+def copy_images_list_EXR(
+    image_paths: List[Path],
+    image_dir: Path,
+    num_downscales: int,
+    crop_border_pixels: Optional[int] = None,
+    crop_factor: Tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0),
+    verbose: bool = False,
+    upscale_factor: Optional[int] = None,
+    nearest_neighbor: bool = False,
+) -> List[Path]:
+    """Copy all .exr images in a list of Paths. Useful for filtering from a directory.
+    Args:
+        image_paths: List of Paths of images to copy to a new directory.
+        image_dir: Path to the output directory.
+        num_downscales: Number of times to downscale the images. Downscales by 2 each time.
+        crop_border_pixels: If not None, crops each edge by the specified number of pixels.
+        crop_factor: Portion of the image to crop. Should be in [0,1] (top, bottom, left, right)
+        verbose: If True, print extra logging.
+    Returns:
+        A list of the copied image Paths.
+    """
+
+    # Remove original directory only if we provide a proper image folder path
+    if image_dir.is_dir() and len(image_paths):
+        # check that output directory is not the same as input directory
+        if image_dir != image_paths[0].parent:
+            shutil.rmtree(image_dir, ignore_errors=True)
+        image_dir.mkdir(exist_ok=True, parents=True)
+
+    copied_image_paths = []
+
+    # Images should be 1-indexed for the rest of the pipeline.
+    for idx, image_path in enumerate(image_paths):
+        if verbose:
+            CONSOLE.log(f"Copying image {idx + 1} of {len(image_paths)}...")
+        copied_image_path = image_dir / f"frame_{idx + 1:05d}{image_path.suffix}"
+        try:
+            # if CR2 raw, we want to read raw and write TIFF, and change the file suffix for downstream processing
+            if image_path.suffix.lower() in ALLOWED_RAW_EXTS:
+                copied_image_path = image_dir / f"frame_{idx + 1:05d}{RAW_CONVERTED_SUFFIX}"
+                with rawpy.imread(str(image_path)) as raw:
+                    rgb = raw.postprocess()
+                imageio.imsave(copied_image_path, rgb)
+                image_paths[idx] = copied_image_path
+            else:
+                shutil.copy(image_path, copied_image_path)
+        except shutil.SameFileError:
+            pass
+        copied_image_paths.append(copied_image_path)
+
+    downscale_dirs = [Path(str(image_dir) + (f"_{2**i}" if i > 0 else "")) for i in range(num_downscales + 1)]
+    downscale_paths = [
+        downscale_dirs[i] / ("frame_%05d" + copied_image_paths[0].suffix) for i in range(num_downscales + 1)
+    ]
+
+    for dir in downscale_dirs:
+        dir.mkdir(parents=True, exist_ok=True)
+
+    num_frames = len(image_paths)
+
+    for j in range(num_frames):
+        hdr_image = cv2.imread(str(copied_image_paths[j]),  cv2.IMREAD_UNCHANGED)
+        # crop .exr image from the left-top corner
+        height = 1 - crop_factor[0] - crop_factor[1]
+        width = 1 - crop_factor[2] - crop_factor[3]
+        start_x = crop_factor[2]
+        start_y = crop_factor[0]
+        if crop_border_pixels is not None:
+            hdr_image = hdr_image[crop_border_pixels:-crop_border_pixels, crop_border_pixels:-crop_border_pixels]
+        elif crop_factor != (0.0, 0.0, 0.0, 0.0):
+            height = int(hdr_image.shape[0] * (1 - crop_factor[0] - crop_factor[1]))
+            width = int(hdr_image.shape[1] * (1 - crop_factor[2] - crop_factor[3]))
+            start_x = int(hdr_image.shape[1] * crop_factor[2])
+            start_y = int(hdr_image.shape[0] *crop_factor[0])
+            hdr_image = hdr_image[start_y:start_y+height, start_x:start_x+width]
+        for i, dir in enumerate(downscale_paths[1:]):
+            downscale = 2**(i+1)
+            image_filename = Path(str(dir)%(j+1))
+            if upscale_factor is not None:
+                downscale /= upscale_factor
+            height, width = hdr_image.shape[:2]
+            newsize = (int(width / downscale), int(height / downscale))
+            hdr_image_downscaled = cv2.resize(hdr_image, newsize, interpolation = cv2.INTER_AREA)    
+            
+            # hdr_image_downscaled = cv2.cvtColor(hdr_image_downscaled, cv2.COLOR_BGR2RGB)
+            hdr_image_downscaled = hdr_image_downscaled.astype("float32")  # shape is (h, w) or (h, w, 3 or 4)
+            if not cv2.imwrite(str(image_filename), hdr_image_downscaled):
+                CONSOLE.log("[bold red]:skull: Failed when write out the downscaled images.")
+                break
+            
+    if num_frames == 0:
+        CONSOLE.log("[bold red]:skull: No usable images in the data folder.")
+    else:
+        CONSOLE.log("[bold green]:tada: Done copying images.")
+
+    return copied_image_paths
+
 
 def copy_and_upscale_polycam_depth_maps_list(
     polycam_depth_image_filenames: List[Path],
