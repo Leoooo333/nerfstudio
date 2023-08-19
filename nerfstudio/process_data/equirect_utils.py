@@ -305,7 +305,7 @@ def generate_planar_projections_from_equirectangular(
                 for u_deg, v_deg in yaw_pitch_pairs:
                     v_rad = torch.pi * v_deg / 180.0
                     u_rad = torch.pi * u_deg / 180.0
-                    pers_image = equi2pers(im, rots={"roll": 0, "pitch": v_rad, "yaw": u_rad})
+                    pers_image = equi2pers(im, rots={"roll": 0, "pitch": v_rad, "yaw": u_rad}, clip_output=False)
                     # transform matrix for blender: object.matrix_world 
                     perspective_camera_rotation = inv(Rotation.from_euler('XYZ', [v_rad, -u_rad, 0], degrees=False).as_matrix())
                     perspective_camera_rotation = current_pano_camera_rotation @  perspective_camera_rotation
