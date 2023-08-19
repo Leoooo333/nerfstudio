@@ -363,7 +363,7 @@ class ViewerState:
         # draw the training cameras and images
         image_indices = self._pick_drawn_image_idxs(len(dataset))
         for idx in image_indices:
-            image = dataset[idx]["image"]
+            image = torch.clamp(dataset[idx]["image"], 0, 1)
             bgr = image[..., [2, 1, 0]]
             camera_json = dataset.cameras.to_json(camera_idx=idx, image=bgr, max_size=100)
             self.viser_server.add_dataset_image(idx=f"{idx:06d}", json=camera_json)
