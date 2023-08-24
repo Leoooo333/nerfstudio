@@ -13,16 +13,18 @@
 # limitations under the License.
 
 """
-Dataset.
+HDR Dataset of .exr format
 """
 from __future__ import annotations
 
+import os
 from copy import deepcopy
 from pathlib import Path
 from typing import Dict, List
-import os 
+
 os.environ["OPENCV_IO_ENABLE_OPENEXR"]="1"
 
+import cv2
 import numpy as np
 import numpy.typing as npt
 import torch
@@ -30,13 +32,12 @@ from jaxtyping import Float
 from PIL import Image
 from torch import Tensor
 from torch.utils.data import Dataset
-import cv2
-
 
 from nerfstudio.cameras.cameras import Cameras
 from nerfstudio.data.dataparsers.base_dataparser import DataparserOutputs
-from nerfstudio.data.utils.data_utils import get_image_mask_tensor_from_path
 from nerfstudio.data.datasets.base_dataset import InputDataset
+from nerfstudio.data.utils.data_utils import get_image_mask_tensor_from_path
+
 
 class HDRInputDataset(InputDataset):
     """Dataset that returns HDR images, OpenEXR.
