@@ -21,7 +21,7 @@ from nerfstudio.plugins.types import MethodSpecification
 
 def Get_lantern_config():
     return TrainerConfig(
-    method_name="Lantern-nerfacto",
+    method_name="lantern-nerfacto",
     steps_per_eval_batch=500,
     steps_per_save=2000,
     max_num_iterations=30000,
